@@ -1,0 +1,196 @@
+﻿@page "/"
+
+<div style="display: flex; align-items: center; margin-bottom: 16px">
+    <div style="white-space:nowrap; margin-right: 16px">ExpandMode:</div>
+    <RadzenSelectBar @bind-Value="@expandMode" TextProperty="Text" ValueProperty="Value" style="margin-right: 16px"
+        Data="@(Enum.GetValues(typeof(DataGridExpandMode)).Cast<DataGridExpandMode>().Select(t => new { Text = $"{t}", Value = t }))" Size="ButtonSize.Small" />
+    <RadzenButton Text="Expand all rows" Click="@(args => ToggleRowsExpand(true))" style="margin-right: 16px" 
+        Disabled=@(allRowsExpanded == true || expandMode == DataGridExpandMode.Single) />
+    <RadzenButton Text="Collapse all rows" Click="@(args => ToggleRowsExpand(false))" 
+        Disabled=@(allRowsExpanded == false || expandMode == DataGridExpandMode.Single) />
+    <div style="white-space:nowrap; margin-left: 16px">Total items: @Order.OrdersCount.ToString()</div>
+</div>
+<RadzenDataGrid @ref="grid" AllowPaging="false" RowRender="@RowRender"
+    Data="@orders" TItem="Order" AllowFiltering="true" AllowSorting="true"
+    AllowColumnResize="true" ExpandMode="@expandMode" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+    SelectionMode="DataGridSelectionMode.Single" GridLines="DataGridGridLines.Both"
+    FilterMode="FilterMode.Simple" LoadChildData="@LoadChildData"
+    FilterPopupRenderMode="PopupRenderMode.OnDemand" AllowVirtualization="true"
+    Style="width: 100%; height: 100%;" >
+    <Columns>
+        <RadzenDataGridColumn TItem="Order" Property="OrderId" Title="Id" Visible="true" Sortable="true" Width="fit-content" MinWidth="75px">
+            <Template Context="data">
+                <table border="0" width="auto" align="left">
+                    <tr>
+                        <td width="auto" align="left" valign="center">
+                            <span>@data.OrderId.ToString()</span>
+                        </td>
+                    </tr>
+                </table>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="Order" Property="OrderName" Title="Name" Visible="true" Sortable="true" Width="fit-content" MinWidth="75px">
+            <Template Context="data">
+                <table border="0" width="auto" align="left">
+                    <tr>
+                        <td width="auto" align="left" valign="center">
+                            <span>@data.OrderName</span>
+                        </td>
+                    </tr>
+                </table>
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+@code {
+
+    public class Order
+    {
+        public static Random StaticRandom = new Random();
+        public static int OrdersCount = 0;
+        public static string GetRandomString(int length = 20)
+        {
+
+            const string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            return new string(Enumerable.Repeat(chars, StaticRandom.Next(1, length))
+                .Select(s => s[StaticRandom.Next(s.Length)]).ToArray());
+        }
+        public string OrderName { get; set; } = GetRandomString();
+        public int OrderId { get; private set; }
+        private int deep;
+
+        public IList<Order> Childs { get; set; } = new List<Order>();
+
+        public IList<Order> GetAllChilds()
+        {
+            List<Order> chs = new List<Order>();
+            if (HaveChilds)
+            {
+                foreach (Order ch in Childs)
+                {
+                    chs.Add(ch);
+                    IList<Order> subChilds = ch.GetAllChilds();
+                    foreach (Order subChild in subChilds) { chs.Add(subChild); }
+                }
+            }
+            return chs;
+        }
+
+        public bool HaveChilds => (Childs.Count > 0);
+
+        public Order(int rate = 5, int maxDeep = 5)
+        {
+            if (rate < 1) { return; }
+            deep = maxDeep;
+            deep--;
+            OrderId = OrdersCount;
+            OrdersCount++;
+            if (deep <= 0) { return; }
+            //int childsNumber = StaticRandom.Next(1, rate);
+            int childsNumber = rate;
+            for (int i = 0; i < childsNumber; i++)
+            {
+                Childs.Add(new Order(rate, deep));
+            }
+        }
+    }
+
+    DataGridExpandMode expandMode = DataGridExpandMode.Multiple;
+    bool? allRowsExpanded;
+
+    async Task ToggleRowsExpand(bool? value)
+    {
+        allRowsExpanded = value;
+
+        if (value == true)
+        {
+            await ExpandAllNodes();
+        }
+        else if (value == false)
+        { 
+            await CollapseAllNodes();
+        }
+    }
+
+    public async Task ExpandAllNodes()
+    {
+        if (grid != null)
+        {
+            IList<Order> expandList = new List<Order>();
+            foreach (Order rootnode in orders)
+            {
+                bool rootExp = grid.IsRowExpanded(rootnode);
+                if (!rootExp) { await grid.ExpandRow(rootnode); }
+                IList<Order> subnodes = rootnode.GetAllChilds();
+                foreach (Order subnode in subnodes)
+                {
+                    bool subExp = grid.IsRowExpanded(subnode);
+                    if (!subExp) { expandList.Add(subnode); }
+                }
+            }
+            await grid.ExpandRows(expandList);
+        }
+    }
+
+    public async Task CollapseAllNodes()
+    {
+        if (grid != null)
+        {
+            IList<Order> collapseList = new List<Order>();
+            foreach (Order rootnode in orders)
+            {
+                bool rootExp = grid.IsRowExpanded(rootnode);
+                if (rootExp) { collapseList.Add(rootnode); }
+                IList<Order> subnodes = rootnode.GetAllChilds();
+                foreach (Order subnode in subnodes)
+                {
+                    bool subExp = grid.IsRowExpanded(subnode);
+                    if (subExp) { collapseList.Add(subnode); }
+                }
+            }
+            await grid.CollapseRows(collapseList);
+        }
+    }
+
+    IList<Order> orders { get; set; } = new List<Order>();
+    RadzenDataGrid<Order> grid;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+
+        //orders = dbContext.Orders.Include("Customer").Include("Employee").Include("OrderDetails").Include("OrderDetails.Product").ToList();
+        if (orders.Count > 0) { return; }
+        Order.OrdersCount = 0;
+
+        for (int j = 0; j < 100; j++)
+        {
+            orders.Add(new Order(6, 4));
+        }
+
+        Console.WriteLine("Total orders: " + Order.OrdersCount.ToString());
+    }
+
+    void RowRender(RowRenderEventArgs<Order> args)
+    {
+        args.Expandable = args.Data.HaveChilds;
+        //args.Expandable = dbContext.Employees.Where(e => e.ReportsTo == args.Data.EmployeeID).Any();
+    }
+    
+    void LoadChildData(DataGridLoadChildDataEventArgs<Order> args)
+    {
+        args.Data = args.Item.Childs;
+        //args.Data = dbContext.Employees.Where(e => e.ReportsTo == args.Item.EmployeeID);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        base.OnAfterRender(firstRender);
+ 
+        if (firstRender)
+        {
+            //await grid.ExpandRow(orders.FirstOrDefault());
+        }
+    }
+}
